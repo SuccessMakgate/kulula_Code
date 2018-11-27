@@ -1,0 +1,254 @@
+﻿
+
+namespace KululaServices.Controllers
+{
+    public class FlightBooksController : ApiController
+    {
+        private kululaContext db = new kululaContext();
+        //----------------------------------------------------------------------------Flight Book--------------------------------------------------------------------------------
+        //*************************************************Post Flight Book & Search***********************************************************************
+        // POST: api/FlightBooks
+        [HttpPost]
+        [ResponseType(typeof(FlightBook))]
+        public IHttpActionResult SearchFlight(FlightBook flightBook)
+        {
+            Random rnd = new Random();
+            Random rnd2 = new Random();
+            List<Aircraft> RandAircraft = new List<Aircraft>();
+            RandAircraft = db.Aircrafts.ToList();
+
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var search = db.FlightSchedules.Where(x => x.DepartDate.Day == flightBook.DepartDate.Day).ToList();
+            if (search.Count() != 0)
+            {
+                string CurrentUser = "Guest";
+                if (HttpContext.Current.User.Identity.Name != null) CurrentUser = HttpContext.Current.User.Identity.Name.ToString();
+
+                flightBook.memberIDF = CurrentUser;
+                flightBook.IsScheduleFound = true;
+                foreach (var searches in search)
+                {
+                    int MaxRows = db.Aircrafts.Count();
+                    Aircraft getAircraft = RandAircraft.ElementAtOrDefault(rnd.Next(MaxRows));
+                    if (!getAircraft.IsFlightFull)
+                    {
+                        if (getAircraft.MaxSeats <= getAircraft.NumSeatBooked) getAircraft.IsFlightFull = true;
+                        else getAircraft.NumSeatBooked = getAircraft.NumSeatBooked + flightBook.NumPeople;
+                        db.Entry(getAircraft).State = EntityState.Modified;
+
+                    }
+                    if (searches.aircrafts.Count(a => a.AircraftId == getAircraft.AircraftId) == 0)
+                        searches.aircrafts.Add(getAircraft);
+                }
+                flightBook.MatchedSchedules = search;
+                db.FlightBooks.Add(flightBook);
+            }
+            else
+            {
+                flightBook.IsScheduleFound = false;
+                db.FlightBooks.Add(flightBook);
+            }
+
+
+            db.SaveChanges();
+
+            return CreatedAtRoute("DefaultApi", new { id = flightBook.FlightBookId }, flightBook);
+        }
+
+        //****************************************************Get Flight Schedule *************************************************************************
+        //Get: api/FlightBooks
+        [HttpGet]
+        [ResponseType(typeof(FlightSchedule))]
+        public IHttpActionResult CheckSchedule()//Must Be List Of Schedule ,Then will Select PArticular Array
+        {
+
+            int MaxRows = db.FlightBooks.Count() - 1;
+            List<FlightBook> AllFlightbook = new List<FlightBook>();
+            List<FlightSchedule> AllSchedules = new List<FlightSchedule>();
+            AllFlightbook = db.FlightBooks.ToList();
+
+            FlightBook CurrentBook = AllFlightbook.ElementAtOrDefault(MaxRows);
+
+            if (CurrentBook.MatchedSchedules.Count != 0 && CurrentBook.IsScheduleFound == true)
+            {
+                foreach (FlightSchedule schedule in CurrentBook.MatchedSchedules)
+                {
+                    AllSchedules.Add(schedule);
+
+                }
+            }
+            else
+            {
+                return StatusCode(HttpStatusCode.NoContent);
+            }
+
+
+            return Ok(AllSchedules);
+        }
+        //*******************************************Add Flight Schedule*************************************************************************
+        // POST: api/FlightSchedules
+        [Route("api/FlightSchedules")]
+        [ResponseType(typeof(FlightSchedule))]
+        public IHttpActionResult PostFlightSchedule(FlightSchedule flightSchedule)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            db.FlightSchedules.Add(flightSchedule);
+            db.SaveChanges();
+
+            return Ok();
+        }
+
+        //*******************************************Seat Book Receipt*************************************************************************
+        // GET: api/seatBook/5
+        [Route("api/SeatBooks/{id}")]
+        [ResponseType(typeof(SeatBooking))]
+        public IHttpActionResult GetSeatBookReceipt(int id)
+        {
+            if (currentSeatbook() != null) return Ok(currentSeatbook());
+            return StatusCode(HttpStatusCode.NoContent);
+        }
+
+        //*******************************************Flight Book Receipt*************************************************************************
+        // GET: api/FlightBook/5
+        [Route("api/FlightBooks/{id}")]
+        [ResponseType(typeof(FlightBook))]
+        public IHttpActionResult GetFlightBookReceipt(int id)
+        {
+            if (currentSeatbook().PaymentStatus)
+            {
+                if (currentFlightbook() != null)
+                    return Ok(currentFlightbook());
+            }
+
+            return StatusCode(HttpStatusCode.NoContent);
+
+        }
+
+
+        //----------------------------------------------------------------------------Aircraft--------------------------------------------------------------------------------
+        //*******************************************Add Aircraft*************************************************************************
+        [Route("api/Aircraft")]
+        [ResponseType(typeof(Aircraft))]
+        public HttpResponseMessage PostAircraft()
+        {
+            string imageName = null;
+
+            var httpReququest = HttpContext.Current.Request;
+
+            var postedFile = httpReququest.Files["Image"];
+
+
+            imageName = Path.GetFileNameWithoutExtension(postedFile.FileName);
+            imageName = imageName + DateTime.Now.ToString("yymmssfff") + Path.GetExtension(postedFile.FileName);
+            var filePath = HttpContext.Current.Server.MapPath("~/Image/" + imageName);
+            postedFile.SaveAs(filePath);
+
+            Aircraft flight = new Aircraft()
+            {
+                AircraftLogo = imageName,
+                AircraftName = httpReququest["AircraftName"],
+                AircraftNo = httpReququest["AircraftNo"],
+                price = Int32.Parse(httpReququest["price"]),
+                MaxSeats = Int32.Parse(httpReququest["MaxSeats"])
+            };
+
+            db.Aircrafts.Add(flight);
+            db.SaveChanges();
+
+            return Request.CreateResponse(HttpStatusCode.Created);
+
+        }
+        //*******************************************Post Seatbook*************************************************************************
+        [Route("api/SeatBookings")]
+        [ResponseType(typeof(SeatBooking))]
+        public IHttpActionResult PostSeatBooking(SeatBooking seatBooking)
+        {
+
+            Aircraft Number_of_Seats = db.Aircrafts.Find(seatBooking.AircraftId);
+            if (seatBooking.SeatName == "Standard Seat") seatBooking.SeatPrice = 0;
+            else if (seatBooking.SeatName == "Aisle chair") seatBooking.SeatPrice = 250;
+            else if (seatBooking.SeatName == "window seat") seatBooking.SeatPrice = 300;
+            else if (seatBooking.SeatName == "amenities Seat") seatBooking.SeatPrice = 800;
+            else if (seatBooking.SeatName == "First Class Seat") seatBooking.SeatPrice = 1000;
+
+
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            seatBooking.SeatNumber = Number_of_Seats.NumSeatBooked;
+            db.SeatBookings.Add(seatBooking);
+            db.SaveChanges();
+
+            return Ok();
+        }
+
+        //==============================GET(Get Specifit SeatBooked): api/SeatBookings/{Id}====================================================================================
+        [Route("api/SeatBookings/{id}")]
+        [ResponseType(typeof(Aircraft))]
+        public IHttpActionResult GetSeatBooking(int id)
+        {
+            //string FlightSchedID_AircraftId = id.ToString();
+            //int flightId = 1;
+            //for (int x = 0; x <= FlightSchedID_AircraftId.Length - 1; x++)
+            //{
+            //    id = Int32.Parse(FlightSchedID_AircraftId[0].ToString());
+            //    flightId = Int32.Parse(FlightSchedID_AircraftId[1].ToString());
+            //}
+
+            int brk = 0;
+            Aircraft Aircraft = db.Aircrafts.Find(id);
+           
+            if (Aircraft == null)
+            {
+                return NotFound();
+            }
+
+            // List<Aircraft> Flight = new List<Aircraft>();
+            // Flight = schedule.aircrafts.Where(a => a.AircraftId == flightId).ToList();
+
+
+            return Ok(Aircraft);
+        }
+
+        //------------------------------------------------------------Current------------------------------------------------------------------------------
+
+        //*******************************************Current Flightbook*************************************************************************
+        private FlightBook currentFlightbook()
+        {
+            int MaxRow = db.FlightBooks.Count() - 1;
+            List<FlightBook> allCarhires = new List<FlightBook>();
+            allCarhires = db.FlightBooks.ToList();
+            FlightBook currentCarhire = new FlightBook();
+            currentCarhire = allCarhires.ElementAt(MaxRow);
+
+            return currentCarhire;
+        }
+
+
+        //*******************************************Current Seatbook*************************************************************************
+        private SeatBooking currentSeatbook()
+        {
+            int MaxRow = db.SeatBookings.Count() - 1;
+            List<SeatBooking> allSeatbooks = new List<SeatBooking>();
+            allSeatbooks = db.SeatBookings.ToList();
+            SeatBooking currentSeatbook = new SeatBooking();
+            currentSeatbook = allSeatbooks.ElementAtOrDefault(MaxRow);
+
+            return currentSeatbook;
+        }
+
+        private bool FlightBookExists(int id)
+        {
+            return db.FlightBooks.Count(e => e.FlightBookId == id) > 0;
+        }
+    }
+}

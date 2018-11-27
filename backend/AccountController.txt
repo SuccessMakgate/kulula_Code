@@ -1,0 +1,218 @@
+﻿
+
+namespace KululaServices.Controllers
+{
+    [Authorize]
+    [RoutePrefix("api/Account")]
+    public class AccountController : ApiController
+    {
+        
+        // POST api/Account/ChangePassword
+        [Route("ChangePassword")]
+        public async Task<IHttpActionResult> ChangePassword(ChangePasswordBindingModel model)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            IdentityResult result = await UserManager.ChangePasswordAsync(User.Identity.GetUserId(), model.OldPassword,
+                model.NewPassword);
+            
+            if (!result.Succeeded)
+            {
+                return GetErrorResult(result);
+            }
+
+            return Ok();
+        }
+
+        // POST api/Account/SetPassword
+        [Route("SetPassword")]
+        public async Task<IHttpActionResult> SetPassword(SetPasswordBindingModel model)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            IdentityResult result = await UserManager.AddPasswordAsync(User.Identity.GetUserId(), model.NewPassword);
+
+            if (!result.Succeeded)
+            {
+                return GetErrorResult(result);
+            }
+
+            return Ok();
+        }
+
+       
+
+        // POST api/Account/Register
+        [AllowAnonymous]
+        [Route("Register")]
+        public async Task<IHttpActionResult> Register(RegisterBindingModel model)
+        {
+            
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var user = new ApplicationUser() { UserName = model.Email, Email = model.Email };
+
+            IdentityResult result = await UserManager.CreateAsync(user, model.Password);
+
+            if (!result.Succeeded)
+            {
+                return GetErrorResult(result);
+            }
+           
+            return Ok();
+        }
+        // POST api/Account/Details
+        private kululaContext dbClient = new kululaContext();
+        [AllowAnonymous]
+        [Route("Details")]
+        [HttpPost]
+        [ResponseType(typeof(Client))]
+        
+        public IHttpActionResult ClientDetails(Client ClientDetails)
+        {
+            
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            dbClient.clients.Add(ClientDetails);
+            ApplicationUser appUser = new ApplicationUser();
+            appUser.ActivationCode = Guid.NewGuid();
+            dbClient.SaveChanges();
+            SendVerificationLink(ClientDetails.Email, appUser.ActivationCode.ToString());
+            return Ok();
+            //return CreatedAtRoute("DefaultApi", new { id = ClientDetails.ClientID }, ClientDetails);
+        }
+        //Put api/Account/Details/modify/{id}
+        [Route("Details/modify/{id}")]
+        [AllowAnonymous]
+        [ResponseType(typeof(void))]
+        public IHttpActionResult PutClient(int id, Client client)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            if (id <= 0)
+            {
+                return BadRequest();
+            }
+            client.ClientID = id;
+            dbClient.Entry(client).State = EntityState.Modified;
+
+            try
+            {
+                dbClient.SaveChanges();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!ClientExists(id))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
+
+            return StatusCode(HttpStatusCode.NoContent);
+        }
+
+        //Get api/Account/Details/get/{id}
+        [Route("Details/get/{id}")]
+        [ResponseType(typeof(Client))]
+        public IHttpActionResult GetClient(int id)
+        {
+            string CurrentUser = null;
+            if (HttpContext.Current.User.Identity.Name != null) CurrentUser = HttpContext.Current.User.Identity.Name.ToString();
+            Client client = dbClient.clients.Where(d => d.Email.ToString() == CurrentUser).FirstOrDefault();
+            if (client == null)
+            {
+                return NotFound();
+            }
+
+            return Ok(client);
+        }
+
+        [NonAction]
+        public void SendVerificationLink(string emailID, string activationCode)
+        {
+
+            var verifyUrl = "/api/Account/VerifyAccount/" + activationCode;
+            var link = Request.RequestUri.AbsoluteUri.Replace(Request.RequestUri.PathAndQuery, verifyUrl);
+
+            
+            var fromEmail = new MailAddress("successngw@gmail.com", "Kulula Dotnet");
+            var toEmail = new MailAddress(emailID);
+            var fromEmailPassword = "Makgate19";
+
+            string subject = "Your Kulula account is successfully created!";
+            string body = "<br/><br/>Your kulula account is " + "Successfully created Please click the link to verify your account" +
+                         "<br/><br/><a href='" + link + "'>" + link + "<a/>";
+
+            var smtp = new SmtpClient
+            {
+                Host = "smtp.gmail.com",
+                Port = 587,
+                EnableSsl = true,
+                DeliveryMethod = SmtpDeliveryMethod.Network,
+                UseDefaultCredentials = true,
+                Credentials = new NetworkCredential(fromEmail.Address, fromEmailPassword)
+            };
+            using (var message = new MailMessage(fromEmail, toEmail)
+            {
+                Subject = subject,
+                Body = body,
+                IsBodyHtml = true
+            })
+                smtp.Send(message);
+        }
+
+        //Get api/Account/VerifyAccount/{id}
+        [HttpGet]
+        [Route("VerifyAccount/{id}")]
+        public HttpResponseMessage VerifyAccount(string id)
+        {
+            var response = Request.CreateResponse(HttpStatusCode.Moved);
+            using (ApplicationDbContext dc = new ApplicationDbContext())
+            {
+                dc.Configuration.ValidateOnSaveEnabled = false;
+                var v = dc.Users.Where(a => a.ActivationCode == new Guid(id)).FirstOrDefault();
+                if (v != null)
+                {
+                    v.EmailConfirmed = true;
+                    dc.SaveChanges();
+                }
+                else
+                {
+                    response = Request.CreateResponse(HttpStatusCode.Conflict);
+                }
+            }
+
+            
+            response.Headers.Location = new Uri("http://localhost:4200/home");
+            return response;
+        }
+        private bool ClientExists(int id)
+        {
+            return dbClient.clients.Count(e => e.ClientID == id) > 0;
+        } 
+
+
+     
+
+        #endregion
+    }
+}

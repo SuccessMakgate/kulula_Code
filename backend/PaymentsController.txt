@@ -1,0 +1,172 @@
+﻿
+namespace KululaServices.Controllers
+{
+    public class PaymentsController : ApiController
+    {
+        private kululaContext dbPayment = new kululaContext();
+
+        //*******************************************Get List of Payments *************************************************************************
+        //  GET: api/Payments
+        [Route("api/payments")]
+        public IQueryable<Payment> GetCarhires()
+        {
+            return dbPayment.Payments;
+        }
+
+        //*******************************************Post Payment *************************************************************************
+        // POST: api/Payments
+        [Route("api/payments")]
+        [ResponseType(typeof(Payment))]
+        public IHttpActionResult PostPayment(Payment payment)
+        {
+            string CurrentUser = null;
+            if (HttpContext.Current.User.Identity.Name !=  null) CurrentUser = HttpContext.Current.User.Identity.Name.ToString();
+
+            DateTime TransactionStamp = DateTime.Now;
+            payment.TransactionDate = TransactionStamp;
+      
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            if (payment.IsSeatBook == true)
+            {
+                currentSeatbook().PaymentStatus = true;
+                dbPayment.Entry(currentSeatbook()).State = EntityState.Modified;
+            }
+            else if (payment.IsCarhire == true)
+            {
+                currentCarhire().PaymentStatus = true;
+                dbPayment.Entry(currentCarhire()).State = EntityState.Modified;
+            }
+
+
+            dbPayment.Payments.Add(payment);
+            dbPayment.SaveChanges();
+            if (CurrentUser != null)
+            {
+                MemberDiscount mPay = new MemberDiscount()
+                { 
+                    DiscountRef= CurrentUser+ payment.PaymentId.ToString(),
+                    MembersEmail = CurrentUser, 
+                    TransnDate= DateTime.Now,
+                    discount = 7.5,
+                    kululaPoints = 15,
+                    PaymentId = payment.PaymentId
+                };
+
+                dbPayment.MemberDiscounts.Add(mPay);
+                dbPayment.SaveChanges();
+            }
+            return Ok();
+        }
+        //*******************************************Get Member Discount *************************************************************************
+        [Route("api/MemberDiscounts/{id}")]
+        [ResponseType(typeof(MemberDiscount))]
+        public IHttpActionResult GetMemberDiscount(string id)
+        {
+            int MaxRow = dbPayment.MemberDiscounts.Count() - 1;
+            List<MemberDiscount> allMemberPayments = new List<MemberDiscount>();
+            allMemberPayments = dbPayment.MemberDiscounts.ToList();
+            MemberDiscount currentMemberPayment = allMemberPayments.ElementAtOrDefault(MaxRow);
+
+            if (currentMemberPayment == null)
+            {
+                return NotFound();
+            }
+
+            return Ok(currentMemberPayment);
+        }
+        //*******************************************Sent Receipt to email *************************************************************************
+        //Get api/Account/VerifyAccount/{id}
+        [HttpPost]
+        [Authorize]
+        [Route("api/payments/receipt/{id}")]
+        public IHttpActionResult VerifyAccount(string id)
+        {
+            string CurrentUser = "Guest";
+            if (HttpContext.Current.User.Identity.Name != null) CurrentUser = HttpContext.Current.User.Identity.Name.ToString();
+            var httpReququest = HttpContext.Current.Request;
+            HtmlElement n = new HtmlElement();
+            var file = httpReququest.Files["tickedImg"];
+            var file2 = httpReququest["tickedImg"];
+            n.InnerHtml = file2;
+            if(CurrentUser!= "Guest" && CurrentUser !=null)
+            SendTicked(CurrentUser, n);
+            var response = 0; //Request.CreateResponse(HttpStatusCode.Moved);
+            return Ok();
+        }
+
+        [NonAction]
+        public void SendTicked(string emailID, HtmlElement Ticked)
+        {
+
+            //var verifyUrl = "/api/Account/VerifyAccount/" + activationCode;
+            //var link = Request.RequestUri.AbsoluteUri.Replace(Request.RequestUri.PathAndQuery, verifyUrl);
+
+
+            var fromEmail = new MailAddress("successngw@gmail.com", "Kulula Dotnet Payment");
+            var toEmail = new MailAddress(emailID);
+            var fromEmailPassword = "Makgate19";
+
+            string subject = "kulula Payment was succesfully !";
+            string body = "<br/><br/>Your kulula payment is " + "Success. Please view your ticked below" +
+                         "<br/><br/>" + Ticked + "";
+
+            var smtp = new SmtpClient
+            {
+                Host = "smtp.gmail.com",
+                Port = 587,
+                EnableSsl = true,
+                DeliveryMethod = SmtpDeliveryMethod.Network,
+                UseDefaultCredentials = true,
+                Credentials = new NetworkCredential(fromEmail.Address, fromEmailPassword)
+            };
+            using (var message = new MailMessage(fromEmail, toEmail)
+            {
+                Subject = subject,
+                Body = body,
+                IsBodyHtml = true
+            })
+                smtp.Send(message);
+        }
+        //*******************************************Current FlightBook *************************************************************************
+        private FlightBook currentFlightbook()
+        {
+            int MaxRow = dbPayment.Carhires.Count() - 1;
+            List<FlightBook> allCarhires = new List<FlightBook>();
+            allCarhires = dbPayment.FlightBooks.ToList();
+            FlightBook currentCarhire = new FlightBook();
+            currentCarhire = allCarhires.ElementAtOrDefault(MaxRow);
+
+            return currentCarhire;
+        }
+        //*******************************************Current Carhire *************************************************************************
+        private Carhire currentCarhire()
+        {
+            int MaxRow = dbPayment.Carhires.Count() - 1;
+            List<Carhire> allCarhires = new List<Carhire>();
+            allCarhires = dbPayment.Carhires.ToList();
+            Carhire currentCarhire = new Carhire();
+            currentCarhire= allCarhires.ElementAtOrDefault(MaxRow);
+
+            return currentCarhire;
+        }
+
+        //*******************************************Current Seatbook*************************************************************************
+        private SeatBooking currentSeatbook()
+        {
+            int MaxRow = dbPayment.SeatBookings.Count() - 1;
+            List<SeatBooking> allSeatbooks = new List<SeatBooking>();
+            allSeatbooks = dbPayment.SeatBookings.ToList();
+            SeatBooking currentSeatbook = new SeatBooking();
+            currentSeatbook= allSeatbooks.ElementAtOrDefault(MaxRow);
+
+            return currentSeatbook;
+        }
+        private bool PaymentExists(int id)
+        {
+            return dbPayment.Payments.Count(e => e.PaymentId == id) > 0;
+        }
+    }
+}
